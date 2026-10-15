@@ -5,7 +5,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 # Page configuration
-st.set_page_config(page_title="Vedic Astrology Toolkit", layout="wide", page_icon="✨")
+st.set_page_config(page_title="Vedic Astrology & Backtesting Toolkit", layout="wide", page_icon="✨")
 
 # 1. Setup Swiss Ephemeris for Lahiri Ayanamsa (Vedic)
 swe.set_sid_mode(swe.SIDM_LAHIRI)
@@ -18,7 +18,11 @@ PLANETS = {
     "Jupiter": swe.JUPITER,
     "Venus": swe.VENUS,
     "Saturn": swe.SATURN,
-    "Rahu": swe.MEAN_NODE
+    "Rahu": swe.MEAN_NODE,
+    "Uranus": swe.URANUS,
+    "Herschel": swe.URANUS, # Alias for Uranus
+    "Neptune": swe.NEPTUNE,
+    "Pluto": swe.PLUTO
 }
 
 RASHIS = [
@@ -112,10 +116,32 @@ def get_sidereal_lon(jd, planet_name):
         calc_result = swe.calc_ut(jd, p_id, swe.FLG_SIDEREAL)
         return calc_result[0][0]
 
+def get_rashi_index(lon):
+    return int(lon / 30) % 12
+
+def get_yoga_type(rashi_a, rashi_b):
+    """Calculates house distance yoga between two Rashi indices (0-11)."""
+    diff = (rashi_b - rashi_a) % 12
+    if diff == 0:
+        return "1/1 (Samyuti / Conjunction)"
+    elif diff == 6:
+        return "1/7 (Saptama / Opposition)"
+    elif diff in [3, 9]:
+        return "4/10 (Kendra / Quadrant)"
+    elif diff in [1, 11]:
+        return "2/12 (Dwirdwadasa)"
+    elif diff in [5, 7]:
+        return "6/8 (Shashtashtaka)"
+    elif diff in [2, 10]:
+        return "3/11 (Sahaj / Labh)"
+    elif diff in [4, 8]:
+        return "5/9 (Trikona)"
+    return None
+
 # --- Modal Dialog Function ---
 @st.dialog("📊 Global Asset Price Inspector (±10 Days)", width="large")
 def render_price_modal(event_dict):
-    st.markdown(f"### Event: **{event_dict.get('Planet', '')}** — *{event_dict.get('Rashi', '')}*")
+    st.markdown(f"### Event: **{event_dict.get('Source', event_dict.get('Planet', ''))}** & **{event_dict.get('Destination', '')}** — *{event_dict.get('Yoga', event_dict.get('Rashi', ''))}*")
     st.write(f"**Period Range:** `{event_dict.get('Start Date')}` to `{event_dict.get('End Date')}`")
     st.info("📌 **Currencies:** Sensex in **Indian Rupees (₹ INR)** | Gold, Silver, Copper, Crude Oil in **US Dollars ($ USD)**")
     
@@ -138,9 +164,30 @@ def render_price_modal(event_dict):
 st.sidebar.title("✨ Vedic Toolkit")
 nav_option = st.sidebar.radio(
     "Navigation Menu",
-    ["📅 Daily Calculator", "🔍 Historical Transit Finder", "🔥 Combust / Retrograde Finder"]
+    [
+        "📅 Daily Calculator", 
+        "🔍 Historical Transit Finder", 
+        "🔥 Combust / Retrograde Finder",
+        "✨ Planetary Yoga Matrix",
+        "🔄 Planets Relation Backtester"
+    ]
 )
 st.sidebar.divider()
+
+ALL_PLANET_NAMES = [
+    "Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", 
+    "Rahu", "Ketu", "Uranus", "Herschel", "Neptune", "Pluto"
+]
+
+YOGA_OPTIONS = [
+    "1/7 (Saptama / Opposition)",
+    "4/10 (Kendra / Quadrant)",
+    "2/12 (Dwirdwadasa)",
+    "6/8 (Shashtashtaka)",
+    "3/11 (Sahaj / Labh)",
+    "5/9 (Trikona)",
+    "1/1 (Samyuti / Conjunction)"
+]
 
 # ==========================================
 # VIEW 1: DAILY CALCULATOR
@@ -154,14 +201,15 @@ if nav_option == "📅 Daily Calculator":
     with col_c2:
         selected_planet = st.selectbox(
             "Select Planet View", 
-            ["ALL", "Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"]
+            ["ALL"] + ALL_PLANET_NAMES
         )
 
     jd = swe.julday(selected_date.year, selected_date.month, selected_date.day, 12.0)
     
+    unique_daily_planets = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Uranus", "Neptune", "Pluto"]
     data = []
     jd_next = jd + 1.0
-    for name, p_id in PLANETS.items():
+    for name in unique_daily_planets:
         lon = get_sidereal_lon(jd, name)
         lon_next = get_sidereal_lon(jd_next, name)
         delta = (lon_next - lon + 360.0) % 360.0
@@ -196,10 +244,11 @@ if nav_option == "📅 Daily Calculator":
     if selected_planet == "ALL":
         st.dataframe(df_planets, use_container_width=True, hide_index=True)
     else:
-        row = df_planets[df_planets["Planet"] == selected_planet].iloc[0]
+        search_target = "Uranus" if selected_planet == "Herschel" else selected_planet
+        row = df_planets[df_planets["Planet"] == search_target].iloc[0]
         mcol1, mcol2, mcol3 = st.columns(3)
         with mcol1:
-            st.metric(label="Planet", value=row["Planet"])
+            st.metric(label="Planet", value=selected_planet)
             st.metric(label="Motion", value=row["Motion"])
         with mcol2:
             st.metric(label="Rashi (Zodiac Sign)", value=row["Rashi (Sign)"])
@@ -216,7 +265,7 @@ elif nav_option == "🔍 Historical Transit Finder":
 
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
-        search_planet = st.selectbox("Search Planet", ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"])
+        search_planet = st.selectbox("Search Planet", ALL_PLANET_NAMES)
     with col_f2:
         search_rashi = st.selectbox("Search Rashi", RASHIS)
     with col_f3:
@@ -232,7 +281,7 @@ elif nav_option == "🔍 Historical Transit Finder":
             results = []
             curr_date = start_date
             in_range = False
-            r_start, r_rashi, r_nak = None, "", ""
+            r_start, r_end, r_rashi, r_nak = None, None, "", ""
             
             while curr_date <= end_date:
                 jd_scan = swe.julday(curr_date.year, curr_date.month, curr_date.day, 12.0)
@@ -261,7 +310,7 @@ elif nav_option == "🔍 Historical Transit Finder":
                         in_range = False
                 curr_date += timedelta(days=1)
                 
-            if in_range:
+            if in_range and r_start is not None:
                 results.append({
                     "Start Date": r_start.strftime("%Y-%m-%d"),
                     "End Date": r_end.strftime("%Y-%m-%d"),
@@ -281,7 +330,6 @@ elif nav_option == "🔍 Historical Transit Finder":
         df_results = pd.DataFrame(results).sort_values(by="Start Date", ascending=False)
         st.success(f"Found {len(df_results)} matching transit periods! **Check/select any row** in the table below to open the price inspector.")
         
-        # DataFrame with interactive row selection checkboxes enabled
         event = st.dataframe(
             df_results, 
             use_container_width=True, 
@@ -303,7 +351,7 @@ elif nav_option == "🔥 Combust / Retrograde Finder":
 
     cr_col1, cr_col2, cr_col3 = st.columns(3)
     with cr_col1:
-        cr_planet = st.selectbox("Select Planet", ["Mars", "Mercury", "Jupiter", "Venus", "Saturn"])
+        cr_planet = st.selectbox("Select Planet", ["Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Uranus", "Herschel", "Neptune", "Pluto"])
     with cr_col2:
         cr_status = st.selectbox("Select Status", ["Retrograde", "Combust"])
     with cr_col3:
@@ -317,7 +365,7 @@ elif nav_option == "🔥 Combust / Retrograde Finder":
             results = []
             curr_date = start_date
             in_range = False
-            r_start, r_rashi, r_nak, r_details = None, "", "", ""
+            r_start, r_end, r_rashi, r_nak, r_details = None, None, "", "", ""
             
             while curr_date <= end_date:
                 jd_scan = swe.julday(curr_date.year, curr_date.month, curr_date.day, 12.0)
@@ -383,7 +431,7 @@ elif nav_option == "🔥 Combust / Retrograde Finder":
                         in_range = False
                 curr_date += timedelta(days=1)
                 
-            if in_range:
+            if in_range and r_start is not None:
                 results.append({
                     "Start Date": r_start.strftime("%Y-%m-%d"),
                     "End Date": r_end.strftime("%Y-%m-%d"),
@@ -405,7 +453,6 @@ elif nav_option == "🔥 Combust / Retrograde Finder":
         df_cr_results = pd.DataFrame(results).sort_values(by="Start Date", ascending=False)
         st.success(f"Found {len(df_cr_results)} matching ranges! **Check/select any row** in the table below to open the price inspector.")
         
-        # DataFrame with interactive row selection checkboxes enabled
         event = st.dataframe(
             df_cr_results, 
             use_container_width=True, 
@@ -418,3 +465,178 @@ elif nav_option == "🔥 Combust / Retrograde Finder":
             selected_row_idx = event.selection["rows"][0]
             selected_event = df_cr_results.iloc[selected_row_idx].to_dict()
             render_price_modal(selected_event)
+
+# ==========================================
+# VIEW 4: PLANETARY YOGA MATRIX
+# ==========================================
+elif nav_option == "✨ Planetary Yoga Matrix":
+    st.title("✨ Planetary Yoga Matrix (1/7, 4/10, 2/12, 6/8, 3/11, 5/9)")
+    st.write("Scan all active planet-to-planet yoga configurations for a selected date and frequency horizon.")
+
+    ym_col1, ym_col2 = st.columns(2)
+    with ym_col1:
+        ym_date = st.date_input("Target Date", value=datetime.today())
+    with ym_col2:
+        ym_freq = st.selectbox("Scan Horizon / Interval", ["Daily View", "Weekly Snapshot", "Monthly Snapshot", "Yearly Snapshot"])
+
+    if st.button("Generate Yoga Matrix", type="primary"):
+        with st.spinner("Analyzing planetary angular relationships..."):
+            base_dt = datetime(ym_date.year, ym_date.month, ym_date.day)
+            
+            if "Daily" in ym_freq:
+                dates_to_check = [base_dt]
+            elif "Weekly" in ym_freq:
+                dates_to_check = [base_dt + timedelta(days=i*7) for i in range(5)]
+            elif "Monthly" in ym_freq:
+                dates_to_check = [base_dt + timedelta(days=i*30) for i in range(6)]
+            else:
+                dates_to_check = [base_dt + timedelta(days=i*365) for i in range(3)]
+
+            all_yoga_records = []
+            matrix_planets = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu", "Uranus", "Neptune", "Pluto"]
+            
+            for dt in dates_to_check:
+                jd_scan = swe.julday(dt.year, dt.month, dt.day, 12.0)
+                
+                positions = {}
+                for p in matrix_planets:
+                    lon = get_sidereal_lon(jd_scan, p)
+                    positions[p] = {
+                        "lon": lon,
+                        "rashi_idx": get_rashi_index(lon),
+                        "rashi_name": calculate_vedic_details(lon)[1]
+                    }
+                
+                checked_pairs = set()
+                for p1 in matrix_planets:
+                    for p2 in matrix_planets:
+                        if p1 == p2:
+                            continue
+                        pair_key = tuple(sorted([p1, p2]))
+                        if pair_key in checked_pairs:
+                            continue
+                        checked_pairs.add(pair_key)
+                        
+                        r1 = positions[p1]["rashi_idx"]
+                        r2 = positions[p2]["rashi_idx"]
+                        
+                        yoga = get_yoga_type(r1, r2)
+                        if yoga:
+                            all_yoga_records.append({
+                                "Date": dt.strftime("%Y-%m-%d"),
+                                "Planet A": p1,
+                                "Sign A": positions[p1]["rashi_name"],
+                                "Planet B": p2,
+                                "Sign B": positions[p2]["rashi_name"],
+                                "Yoga Relationship": yoga
+                            })
+
+            if all_yoga_records:
+                df_yoga = pd.DataFrame(all_yoga_records)
+                st.success(f"Found {len(df_yoga)} active yoga relationships!")
+                st.dataframe(df_yoga, use_container_width=True, hide_index=True)
+            else:
+                st.warning("No significant yoga relationships found for this window.")
+
+# ==========================================
+# VIEW 5: PLANETS RELATION BACKTESTER
+# ==========================================
+elif nav_option == "🔄 Planets Relation Backtester":
+    st.title("🔄 Planets Relation Backtester (50Y / 2Y)")
+    st.write("Scan historical or future date ranges when a **Source Planet** and **Destination Planet** formed a specific yoga (1/7, 4/10, 2/12, 6/8, 3/11, 5/9).")
+
+    pr_col1, pr_col2, pr_col3, pr_col4 = st.columns(4)
+    with pr_col1:
+        source_planet = st.selectbox("Source Planet", ALL_PLANET_NAMES, index=4)
+    with pr_col2:
+        dest_planet = st.selectbox("Destination Planet", ALL_PLANET_NAMES, index=6)
+    with pr_col3:
+        target_yoga = st.selectbox("Select Yoga", YOGA_OPTIONS)
+    with pr_col4:
+        pr_horizon = st.selectbox("Time Horizon", ["Past 50 Years", "Next 2 Years (Future)"], key="pr_horiz")
+
+    if st.button("Scan Planet Relations", type="primary"):
+        if source_planet == dest_planet:
+            st.error("Source and Destination planets cannot be the same!")
+        else:
+            with st.spinner(f"Scanning relations between {source_planet} and {dest_planet} ({target_yoga})... Please wait."):
+                end_date = datetime.today() + timedelta(days=2 * 365) if "Future" in pr_horizon else datetime.today()
+                start_date = datetime.today() if "Future" in pr_horizon else end_date - timedelta(days=50 * 365)
+                
+                results = []
+                curr_date = start_date
+                in_range = False
+                r_start, r_end, r_sig_a, r_sig_b = None, None, "", ""
+                
+                while curr_date <= end_date:
+                    jd_scan = swe.julday(curr_date.year, curr_date.month, curr_date.day, 12.0)
+                    
+                    lon_s = get_sidereal_lon(jd_scan, source_planet)
+                    lon_d = get_sidereal_lon(jd_scan, dest_planet)
+                    
+                    r_s = get_rashi_index(lon_s)
+                    r_d = get_rashi_index(lon_d)
+                    
+                    current_yoga = get_yoga_type(r_s, r_d)
+                    matched = (current_yoga == target_yoga)
+                    
+                    if matched:
+                        _, name_s, _, _ = calculate_vedic_details(lon_s)
+                        _, name_d, _, _ = calculate_vedic_details(lon_d)
+                        if not in_range:
+                            in_range = True
+                            r_start = curr_date
+                            r_sig_a = name_s
+                            r_sig_b = name_d
+                        r_end = curr_date
+                    else:
+                        if in_range:
+                            results.append({
+                                "Start Date": r_start.strftime("%Y-%m-%d"),
+                                "End Date": r_end.strftime("%Y-%m-%d"),
+                                "Year": r_start.year,
+                                "Source": source_planet,
+                                "Destination": dest_planet,
+                                "Yoga": target_yoga,
+                                "Source Sign": r_sig_a,
+                                "Dest Sign": r_sig_b
+                            })
+                            in_range = False
+                    curr_date += timedelta(days=1)
+                    
+                if in_range and r_start is not None:
+                    results.append({
+                        "Start Date": r_start.strftime("%Y-%m-%d"),
+                        "End Date": r_end.strftime("%Y-%m-%d"),
+                        "Year": r_start.year,
+                        "Source": source_planet,
+                        "Destination": dest_planet,
+                        "Yoga": target_yoga,
+                        "Source Sign": r_sig_a,
+                        "Dest Sign": r_sig_b
+                    })
+
+                if results:
+                    st.session_state.pr_results = results
+                else:
+                    st.session_state.pr_results = None
+
+    if "pr_results" in st.session_state and st.session_state.pr_results:
+        results = st.session_state.pr_results
+        df_pr = pd.DataFrame(results).sort_values(by="Start Date", ascending=False)
+        st.success(f"Found {len(df_pr)} matching relation periods! **Check/select any row** below to inspect global asset prices.")
+        
+        event = st.dataframe(
+            df_pr, 
+            use_container_width=True, 
+            hide_index=True, 
+            on_select="rerun", 
+            selection_mode="single-row"
+        )
+        
+        if event and event.selection.get("rows"):
+            selected_row_idx = event.selection["rows"][0]
+            selected_event = df_pr.iloc[selected_row_idx].to_dict()
+            render_price_modal(selected_event)
+    elif "pr_results" in st.session_state and st.session_state.pr_results is None:
+        st.warning("No matching planet relation periods found for the selected combination.")
